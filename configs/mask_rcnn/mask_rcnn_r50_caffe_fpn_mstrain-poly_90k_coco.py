@@ -12,5 +12,5 @@ lr_config = dict(
 runner = dict(_delete_=True, type='IterBasedRunner', max_iters=90000)
 
 checkpoint_config = dict(interval=5000)
-evaluation = dict(interval=5000, metric='bbox')
+evaluation = dict(interval=5000, metric=['bbox', 'segm'])
 
