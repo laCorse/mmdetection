@@ -283,7 +283,7 @@ Optional arguments:
 
 ### Examples
 
-Assume that you have already downloaded the checkpoints to the directory `checkpoints/`.
+Assuming that you have already downloaded the checkpoints to the directory `checkpoints/`.
 
 1. Test Faster R-CNN and visualize the results. Press any key for the next image.
    Config and checkpoint files are available [here](https://github.com/open-mmlab/mmdetection/tree/master/configs/faster_rcnn).
@@ -300,7 +300,7 @@ Assume that you have already downloaded the checkpoints to the directory `checkp
 
    ```shell
    python tools/test.py \
-       configs/faster_rcnn/faster_rcnn_r50_fpn_1x.py \
+       configs/faster_rcnn/faster_rcnn_r50_fpn_1x_coco.py \
        checkpoints/faster_rcnn_r50_fpn_1x_coco_20200130-047c8118.pth \
        --show-dir faster_rcnn_r50_fpn_1x_results
    ```

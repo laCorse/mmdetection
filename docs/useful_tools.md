@@ -222,7 +222,7 @@ curl -O curl -O https://raw.githubusercontent.com/pytorch/serve/master/docs/imag
 curl http://127.0.0.1:8080/predictions/${MODEL_NAME} -T 3dogs.jpg
 ```
 
-You should obtain a respose similar to:
+You should obtain a response similar to:
 
 ```json
 [
@@ -310,7 +310,7 @@ Params: 37.74 M
 We provide a script to convert model to [ONNX](https://github.com/onnx/onnx) format. We also support comparing the output results between Pytorch and ONNX model for verification.
 
 ```shell
-python tools/deployment/pytorch2onnx.py ${CONFIG_FILE} ${CHECKPOINT_FILE} --output_file ${ONNX_FILE} [--shape ${INPUT_SHAPE} --verify]
+python tools/deployment/pytorch2onnx.py ${CONFIG_FILE} ${CHECKPOINT_FILE} --output-file ${ONNX_FILE} [--shape ${INPUT_SHAPE} --verify]
 ```
 
 **Note**: This tool is still experimental. Some customized operators are not supported for now. For a detailed description of the usage and the list of supported models, please refer to [pytorch2onnx](tutorials/pytorch2onnx.md).
@@ -377,9 +377,34 @@ python tools/dataset_converters/cityscapes.py ${CITYSCAPES_PATH} [-h] [--img-dir
 python tools/dataset_converters/pascal_voc.py ${DEVKIT_PATH} [-h] [-o ${OUT_DIR}]
 ```
 
-## Robust Detection Benchmark
+## Benchmark
+
+### Robust Detection Benchmark
 
 `tools/analysis_tools/test_robustness.py` and`tools/analysis_tools/robustness_eval.py`  helps users to evaluate model robustness. The core idea comes from [Benchmarking Robustness in Object Detection: Autonomous Driving when Winter is Coming](https://arxiv.org/abs/1907.07484). For more information how to evaluate models on corrupted images and results for a set of standard models please refer to [robustness_benchmarking.md](robustness_benchmarking.md).
+
+### FPS Benchmark
+
+`tools/analysis_tools/benchmark.py` helps users to calculate FPS. The FPS value includes model forward and post-processing. In order to get a more accurate value, currently only supports single GPU distributed startup mode.
+
+```shell
+python -m torch.distributed.launch --nproc_per_node=1 --master_port=${PORT} tools/analysis_tools/benchmark.py \
+    ${CONFIG} \
+    ${CHECKPOINT} \
+    [--repeat-num ${REPEAT_NUM}] \
+    [--max-iter ${MAX_ITER}] \
+    [--log-interval ${LOG_INTERVAL}] \
+    --launcher pytorch
+```
+
+Examples: Assuming that you have already downloaded the `Faster R-CNN` model checkpoint to the directory `checkpoints/`.
+
+```shell
+python -m torch.distributed.launch --nproc_per_node=1 --master_port=29500 tools/analysis_tools/benchmark.py \
+       configs/faster_rcnn/faster_rcnn_r50_fpn_1x_coco.py \
+       checkpoints/faster_rcnn_r50_fpn_1x_coco_20200130-047c8118.pth \
+       --launcher pytorch
+```
 
 ## Miscellaneous
 
@@ -447,3 +472,21 @@ differential_evolution step 489: f(x)= 0.386625
 2021-07-19 19:46:40,776 - mmdet - INFO Anchor differential evolution result:[[10, 12], [15, 30], [32, 22], [29, 59], [61, 46], [57, 116], [112, 89], [154, 198], [349, 336]]
 2021-07-19 19:46:40,798 - mmdet - INFO Result saved in work_dirs/anchor_optimize_result.json
 ```
+
+## Confution Matrix
+
+A confusion matrix is a summary of prediction results.
+
+`tools/analysis_tools/confusion_matrix.py` can analyze the prediction results and plot a confution matrix table.
+
+First, run `tools/test.py` to save the `.pkl` detection results.
+
+Then, run
+
+```
+python tools/analysis_tools/confusion_matrix.py ${CONFIG}  ${DETECTION_RESULTS}  ${SAVE_DIR} --show
+```
+
+And you will get a confution matrix like this:
+
+![confution_matrix_example](https://user-images.githubusercontent.com/12907710/140513068-994cdbf4-3a4a-48f0-8fd8-2830d93fd963.png)

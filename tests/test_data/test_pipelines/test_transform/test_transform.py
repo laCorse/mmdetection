@@ -37,7 +37,7 @@ def test_resize():
             multiscale_mode='2333')
         build_from_cfg(transform, PIPELINES)
 
-    # test assertion if both scale and scale_factor are setted
+    # test assertion if both scale and scale_factor are set
     with pytest.raises(AssertionError):
         results = dict(
             img_prefix=osp.join(osp.dirname(__file__), '../../../data'),
@@ -80,6 +80,28 @@ def test_resize():
     assert np.equal(results['img'], results['img2']).all()
     assert results['img_shape'] == (800, 1280, 3)
     assert results['img'].dtype == results['img'].dtype == np.uint8
+
+    results_seg = {
+        'img': img,
+        'img_shape': img.shape,
+        'ori_shape': img.shape,
+        'gt_semantic_seg': copy.deepcopy(img),
+        'gt_seg': copy.deepcopy(img),
+        'seg_fields': ['gt_semantic_seg', 'gt_seg']
+    }
+    transform = dict(
+        type='Resize',
+        img_scale=(640, 400),
+        multiscale_mode='value',
+        keep_ratio=False)
+    resize_module = build_from_cfg(transform, PIPELINES)
+    results_seg = resize_module(results_seg)
+    assert results_seg['gt_semantic_seg'].shape == results_seg['gt_seg'].shape
+    assert results_seg['img_shape'] == (400, 640, 3)
+    assert results_seg['img_shape'] != results_seg['ori_shape']
+    assert results_seg['gt_semantic_seg'].shape == results_seg['img_shape']
+    assert np.equal(results_seg['gt_semantic_seg'],
+                    results_seg['gt_seg']).all()
 
 
 def test_flip():
@@ -408,6 +430,17 @@ def test_pad():
     results['img'] = img
     results = transform(results)
     assert results['img'].shape[0] == results['img'].shape[1]
+
+    # test the pad_val is converted to a dict
+    transform = dict(type='Pad', size_divisor=32, pad_val=0)
+    with pytest.deprecated_call():
+        transform = build_from_cfg(transform, PIPELINES)
+
+    assert isinstance(transform.pad_val, dict)
+    results = transform(results)
+    img_shape = results['img'].shape
+    assert img_shape[0] % 32 == 0
+    assert img_shape[1] % 32 == 0
 
 
 def test_normalize():
@@ -847,7 +880,8 @@ def test_random_affine():
         max_shear_degree=0.,
         border=(0, 0),
         min_bbox_size=2,
-        max_aspect_ratio=20)
+        max_aspect_ratio=20,
+        skip_filter=False)
     random_affine_module = build_from_cfg(transform, PIPELINES)
 
     results = random_affine_module(results)
@@ -932,3 +966,30 @@ def test_mixup():
     assert results['gt_labels'].dtype == np.int64
     assert results['gt_bboxes'].dtype == np.float32
     assert results['gt_bboxes_ignore'].dtype == np.float32
+
+
+def test_photo_metric_distortion():
+    img = mmcv.imread(
+        osp.join(osp.dirname(__file__), '../../../data/color.jpg'), 'color')
+    transform = dict(type='PhotoMetricDistortion')
+    distortion_module = build_from_cfg(transform, PIPELINES)
+
+    # test assertion for invalid img_fields
+    with pytest.raises(AssertionError):
+        results = dict()
+        results['img'] = img
+        results['img2'] = img
+        results['img_fields'] = ['img', 'img2']
+        distortion_module(results)
+
+    # test uint8 input
+    results = dict()
+    results['img'] = img
+    results = distortion_module(results)
+    assert results['img'].dtype == np.float32
+
+    # test float32 input
+    results = dict()
+    results['img'] = img.astype(np.float32)
+    results = distortion_module(results)
+    assert results['img'].dtype == np.float32
