@@ -20,40 +20,33 @@ from mmdet.utils import collect_env, get_root_logger
 
 
 def replace_ceph_backend(cfg):
+    import re
     cfg_pretty_text = cfg.pretty_text
 
     replace_strs = r'''file_client_args = dict(
                     backend='petrel',
                     path_mapping=dict({
-                        '.data/INPLACEHOLD/': 's3://openmmlab/datasets/detection/INPLACEHOLD/',
-                        'data/INPLACEHOLD/': 's3://openmmlab/datasets/detection/INPLACEHOLD/'
+                        '.data/': 's3://openmmlab/datasets/detection/',
+                        'data/': 's3://openmmlab/datasets/detection/'
                     }))
                 '''
-
-    if 'cityscapes' in cfg_pretty_text:
-        replace_strs = replace_strs.replace('INPLACEHOLD', 'cityscapes')
-    elif 'coco' in cfg_pretty_text:
-        replace_strs = replace_strs.replace('INPLACEHOLD', 'coco')
-    else:
-        NotImplemented('Does not support global replacement')
-
-    # replace LoadImageFromFile
     replace_strs = replace_strs.replace(' ', '').replace('\n', '')
+
+    # 1 replace dataset
+    pattern = re.compile(r"ann_file='\S*',")
+    selected_str = pattern.findall(cfg_pretty_text)
+    selected_str = set(selected_str)
+    for s in selected_str:
+        cfg_pretty_text = cfg_pretty_text.replace(s, s + '\n' + replace_strs+',')
+
+    # 2 replace LoadImageFromFile
     cfg_pretty_text = cfg_pretty_text.replace('LoadImageFromFile\'', 'LoadImageFromFile\',' + replace_strs)
 
-    # replace LoadPanopticAnnotations
+    # 3 replace LoadAnnotations
+    cfg_pretty_text = cfg_pretty_text.replace('LoadAnnotations\'', 'LoadAnnotations\',' + replace_strs)
     if 'LoadPanopticAnnotations' in cfg_pretty_text:
         cfg_pretty_text = cfg_pretty_text.replace('LoadPanopticAnnotations\'',
                                                   'LoadPanopticAnnotations\',' + replace_strs)
-    else:
-        # replace instance seg
-        train_data_cfg = cfg.data.train
-        while 'dataset' in train_data_cfg and train_data_cfg['type'] != 'MultiImageMixDataset':
-            train_data_cfg = train_data_cfg['dataset']
-        for pipeline in train_data_cfg.pipeline:
-            if 'LoadAnnotations' in pipeline['type'] and 'with_seg' in pipeline and pipeline['with_seg'] is True:
-                cfg_pretty_text = cfg_pretty_text.replace('LoadAnnotations\'',
-                                                          'LoadAnnotations\',' + replace_strs)
 
     cfg = cfg.fromstring(cfg_pretty_text, file_format='.py')
     return cfg
