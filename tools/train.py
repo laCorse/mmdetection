@@ -19,8 +19,7 @@ from mmdet.models import build_detector
 from mmdet.utils import collect_env, get_root_logger
 
 
-def replace_ceph_backend(cfg):
-    import re
+def replace_ceph_backend(cfg, only_image=False):
     cfg_pretty_text = cfg.pretty_text
 
     replace_strs = r'''file_client_args = dict(
@@ -32,12 +31,15 @@ def replace_ceph_backend(cfg):
                 '''
     replace_strs = replace_strs.replace(' ', '').replace('\n', '')
 
-    # 1 replace dataset
-    pattern = re.compile(r"ann_file='\S*',")
-    selected_str = pattern.findall(cfg_pretty_text)
-    selected_str = set(selected_str)
-    for s in selected_str:
-        cfg_pretty_text = cfg_pretty_text.replace(s, s + '\n' + replace_strs+',')
+    if not only_image:
+        # full ceph style, include ann_file
+        import re
+        # 1 replace dataset
+        pattern = re.compile(r"ann_file='\S*',")
+        selected_str = pattern.findall(cfg_pretty_text)
+        selected_str = set(selected_str)
+        for s in selected_str:
+            cfg_pretty_text = cfg_pretty_text.replace(s, s + '\n' + replace_strs+',')
 
     # 2 replace LoadImageFromFile
     cfg_pretty_text = cfg_pretty_text.replace('LoadImageFromFile\'', 'LoadImageFromFile\',' + replace_strs)
