@@ -6,4 +6,4 @@ model = dict(
         loss_normalizer_momentum=0.9,
         loss_normalizer=100),
 )
-
+lr_config = dict(warmup_iters=1000)
