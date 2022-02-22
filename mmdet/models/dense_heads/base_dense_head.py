@@ -14,6 +14,8 @@ class BaseDenseHead(BaseModule, metaclass=ABCMeta):
 
     def __init__(self, init_cfg=None):
         super(BaseDenseHead, self).__init__(init_cfg)
+        from detectron2.modeling.box_regression import Box2BoxTransform
+        self.box2box_transform = Box2BoxTransform(weights=(1.0, 1.0, 1.0, 1.0))
 
     def init_weights(self):
         super(BaseDenseHead, self).init_weights()
@@ -336,9 +338,196 @@ class BaseDenseHead(BaseModule, metaclass=ABCMeta):
         if proposal_cfg is None:
             return losses
         else:
-            proposal_list = self.get_bboxes(
-                *outs, img_metas=img_metas, cfg=proposal_cfg)
+            proposal_list = self._get_batch_bboxes(outs, img_metas)
+            # proposal_list = self._d2_predict(outs, img_metas)
+            # proposal_list = self.get_bboxes(
+            #     *outs, img_metas=img_metas, cfg=proposal_cfg)
             return losses, proposal_list
+
+    # rpn batch 逻辑
+    def _get_batch_bboxes(self, outs, img_metas):
+        cls_scores_ = outs[0]
+        bbox_preds_ = outs[1]
+
+        device = cls_scores_[0].device
+        featmap_sizes = [cls_scores_[i].shape[-2:] for i in range(5)]
+        mlvl_anchors = self.anchor_generator.grid_priors(
+            featmap_sizes, device=device)
+
+        cls_scores = [cls_scores_[i].detach() for i in range(5)]
+        bbox_preds = [bbox_preds_[i].detach() for i in range(5)]
+
+        import copy
+        cfg = self.test_cfg
+        cfg = copy.deepcopy(cfg)
+        # bboxes from different level should be independent during NMS,
+        # level_ids are used as labels for batched NMS to separate them
+        level_ids = []
+        mlvl_scores = []
+        mlvl_bbox_preds = []
+        mlvl_valid_anchors = []
+        batch_size = cls_scores[0].shape[0]
+        nms_pre_tensor = cfg.nms_pre
+
+        for idx in range(len(cls_scores)):
+            rpn_cls_score = cls_scores[idx]
+            rpn_bbox_pred = bbox_preds[idx]
+            assert rpn_cls_score.size()[-2:] == rpn_bbox_pred.size()[-2:]
+            rpn_cls_score = rpn_cls_score.permute(0, 2, 3, 1)
+            if self.use_sigmoid_cls:
+                rpn_cls_score = rpn_cls_score.reshape(batch_size, -1)
+                # scores = rpn_cls_score.sigmoid()
+                scores = rpn_cls_score
+            else:
+                rpn_cls_score = rpn_cls_score.reshape(batch_size, -1, 2)
+                # We set FG labels to [0, num_class-1] and BG label to
+                # num_class in RPN head since mmdet v2.5, which is unified to
+                # be consistent with other head since mmdet v2.0. In mmdet v2.0
+                # to v2.4 we keep BG label as 0 and FG label as 1 in rpn head.
+                scores = rpn_cls_score.softmax(-1)[..., 0]
+            rpn_bbox_pred = rpn_bbox_pred.permute(0, 2, 3, 1).reshape(
+                batch_size, -1, 4)
+            anchors = mlvl_anchors[idx]
+            anchors = anchors.expand_as(rpn_bbox_pred)
+            if nms_pre_tensor > 0:
+                # sort is faster than topk
+                # _, topk_inds = scores.topk(cfg.nms_pre)
+                # keep topk op for dynamic k in onnx model
+                if scores.shape[-1] > cfg.nms_pre:
+                    ranked_scores, rank_inds = scores.sort(descending=True)
+                    topk_inds = rank_inds[:, :cfg.nms_pre]
+                    scores = ranked_scores[:, :cfg.nms_pre]
+                    batch_inds = torch.arange(batch_size).view(
+                        -1, 1).expand_as(topk_inds)
+                    rpn_bbox_pred = rpn_bbox_pred[batch_inds, topk_inds, :]
+                    anchors = anchors[batch_inds, topk_inds, :]
+
+            mlvl_scores.append(scores)
+            mlvl_bbox_preds.append(rpn_bbox_pred)
+            mlvl_valid_anchors.append(anchors)
+            level_ids.append(
+                scores.new_full((
+                    batch_size,
+                    scores.size(1),
+                ),
+                    idx,
+                    dtype=torch.long))
+
+        batch_mlvl_scores = torch.cat(mlvl_scores, dim=1)
+        batch_mlvl_anchors = torch.cat(mlvl_valid_anchors, dim=1)
+        batch_mlvl_rpn_bbox_pred = torch.cat(mlvl_bbox_preds, dim=1)
+
+        # 暂时去掉 max_shape,对速度影响不会很大
+        batch_mlvl_proposals = self.bbox_coder.decode(
+            batch_mlvl_anchors.reshape(-1, 4), batch_mlvl_rpn_bbox_pred.reshape(-1, 4))
+        batch_mlvl_proposals = batch_mlvl_proposals.view(batch_size, -1, 4)
+
+        batch_mlvl_ids = torch.cat(level_ids, dim=1)
+
+        result_list = []
+        img_shapes = [meta['img_shape'][:2] for meta in img_metas]
+
+        for (mlvl_proposals, mlvl_scores,
+             mlvl_ids, image_shape) in zip(batch_mlvl_proposals, batch_mlvl_scores,
+                                           batch_mlvl_ids, img_shapes):
+            # Skip nonzero op while exporting to ONNX
+            if cfg.min_bbox_size >= 0:
+                w = mlvl_proposals[:, 2] - mlvl_proposals[:, 0]
+                h = mlvl_proposals[:, 3] - mlvl_proposals[:, 1]
+                valid_ind = torch.nonzero(
+                    (w > cfg.min_bbox_size)
+                    & (h > cfg.min_bbox_size),
+                    as_tuple=False).squeeze()
+                if not valid_ind.all():
+                    mlvl_proposals = mlvl_proposals[valid_ind, :]
+                    mlvl_scores = mlvl_scores[valid_ind]
+                    mlvl_ids = mlvl_ids[valid_ind]
+
+            # 裁剪
+            mlvl_proposals[..., 0::2].clamp_(min=0, max=image_shape[1])
+            mlvl_proposals[..., 1::2].clamp_(min=0, max=image_shape[0])
+
+            dets, keep = batched_nms(mlvl_proposals, mlvl_scores, mlvl_ids,
+                                     cfg.nms)
+            result_list.append(dets[:cfg.max_per_img])
+        return result_list
+
+    # d2 版本，需要软链接 d2 代码才能跑
+    def _d2_predict(self, outs, img_metas):
+        from detectron2.modeling.proposal_generator.proposal_utils import find_top_rpn_proposals
+        from detectron2.structures import Boxes
+
+        cls_scores = outs[0]
+        bbox_pred = outs[1]
+        featmap_sizes = [outs[0][i].shape[-2:] for i in range(5)]
+        mlvl_priors = self.prior_generator.grid_priors(
+            featmap_sizes,
+            dtype=cls_scores[0].dtype,
+            device=cls_scores[0].device)
+
+        anchors = []
+        for i in range(5):
+            anchors.append(Boxes(mlvl_priors[i]))
+
+        # Transpose the Hi*Wi*A dimension to the middle:
+        pred_objectness_logits = [
+            # (N, A, Hi, Wi) -> (N, Hi, Wi, A) -> (N, Hi*Wi*A)
+            score.permute(0, 2, 3, 1).flatten(1)
+            for score in cls_scores
+        ]
+        pred_anchor_deltas = [
+            # (N, A*B, Hi, Wi) -> (N, A, B, Hi, Wi) -> (N, Hi, Wi, A, B) -> (N, Hi*Wi*A, B)
+            x.view(x.shape[0], -1, 4, x.shape[-2], x.shape[-1])
+                .permute(0, 3, 4, 1, 2)
+                .flatten(1, -2)
+            for x in bbox_pred
+        ]
+
+        with torch.no_grad():
+            pred_proposals = self._decode_proposals(anchors, pred_anchor_deltas,
+                                                    [meta['img_shape'][:2] for meta in img_metas])
+            proposal_list1 = find_top_rpn_proposals(
+                pred_proposals,
+                pred_objectness_logits,
+                [meta['img_shape'][:2] for meta in img_metas],
+                0.7,
+                2000,
+                1000,
+                0.0,
+                True,
+            )
+        proposal_list = []
+        for list_1 in proposal_list1:
+            proposal_boxes = list_1.proposal_boxes
+            objectness_logits = list_1.objectness_logits
+            proposal_list.append(torch.cat([proposal_boxes.tensor, objectness_logits[:, None]], dim=-1))
+        return proposal_list
+
+    def _decode_proposals(self, anchors, pred_anchor_deltas, metas):
+        """
+        Transform anchors into proposals by applying the predicted anchor deltas.
+
+        Returns:
+            proposals (list[Tensor]): A list of L tensors. Tensor i has shape
+                (N, Hi*Wi*A, B)
+        """
+        N = pred_anchor_deltas[0].shape[0]
+        proposals = []
+        # For each feature map
+        for anchors_i, pred_anchor_deltas_i, meta_i in zip(anchors, pred_anchor_deltas, metas):
+            B = anchors_i.tensor.size(1)
+            pred_anchor_deltas_i = pred_anchor_deltas_i.reshape(-1, B)
+            # Expand anchors to shape (N*Hi*Wi*A, B)
+            anchors_i = anchors_i.tensor.unsqueeze(0).expand(N, -1, -1).reshape(-1, B)
+
+            # 目前，我们的比 box2box_transform 快
+            proposals_i = self.bbox_coder.decode(
+                pred_anchor_deltas_i, anchors_i)
+
+            # proposals_i = self.box2box_transform.apply_deltas(pred_anchor_deltas_i, anchors_i)
+            # Append feature map proposals with shape (N, Hi*Wi*A, B)
+            proposals.append(proposals_i.view(N, -1, B))
+        return proposals
 
     def simple_test(self, feats, img_metas, rescale=False):
         """Test function without test-time augmentation.
@@ -473,18 +662,18 @@ class BaseDenseHead(BaseModule, metaclass=ABCMeta):
 
                 batch_inds = torch.arange(
                     batch_size, device=bbox_pred.device).view(
-                        -1, 1).expand_as(topk_inds).long()
+                    -1, 1).expand_as(topk_inds).long()
                 # Avoid onnx2tensorrt issue in https://github.com/NVIDIA/TensorRT/issues/1134 # noqa: E501
                 transformed_inds = bbox_pred.shape[1] * batch_inds + topk_inds
                 priors = priors.reshape(
                     -1, priors.size(-1))[transformed_inds, :].reshape(
-                        batch_size, -1, priors.size(-1))
+                    batch_size, -1, priors.size(-1))
                 bbox_pred = bbox_pred.reshape(-1,
                                               4)[transformed_inds, :].reshape(
-                                                  batch_size, -1, 4)
+                    batch_size, -1, 4)
                 scores = scores.reshape(
                     -1, self.cls_out_channels)[transformed_inds, :].reshape(
-                        batch_size, -1, self.cls_out_channels)
+                    batch_size, -1, self.cls_out_channels)
                 if with_score_factors:
                     score_factors = score_factors.reshape(
                         -1, 1)[transformed_inds].reshape(batch_size, -1)

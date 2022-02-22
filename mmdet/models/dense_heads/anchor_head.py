@@ -192,9 +192,9 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         # for each image, we compute valid flags of multi level anchors
         valid_flag_list = []
         for img_id, img_meta in enumerate(img_metas):
-            multi_level_flags = self.prior_generator.valid_flags(
-                featmap_sizes, img_meta['pad_shape'], device)
-            valid_flag_list.append(multi_level_flags)
+            # multi_level_flags = self.prior_generator.valid_flags(
+            #     featmap_sizes, img_meta['pad_shape'], device)
+            valid_flag_list.append([])
 
         return anchor_list, valid_flag_list
 
@@ -236,13 +236,14 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                 num_total_pos (int): Number of positive samples in all images
                 num_total_neg (int): Number of negative samples in all images
         """
-        inside_flags = anchor_inside_flags(flat_anchors, valid_flags,
-                                           img_meta['img_shape'][:2],
-                                           self.train_cfg.allowed_border)
-        if not inside_flags.any():
-            return (None, ) * 7
+        # inside_flags = anchor_inside_flags(flat_anchors, valid_flags,
+        #                                    img_meta['img_shape'][:2],
+        #                                    self.train_cfg.allowed_border)
+        # if not inside_flags.any():
+        #     return (None, ) * 7
         # assign gt and sample anchors
-        anchors = flat_anchors[inside_flags, :]
+        # anchors = flat_anchors[inside_flags, :]
+        anchors = flat_anchors
 
         assign_result = self.assigner.assign(
             anchors, gt_bboxes, gt_bboxes_ignore,
@@ -283,15 +284,15 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             label_weights[neg_inds] = 1.0
 
         # map up to original set of anchors
-        if unmap_outputs:
-            num_total_anchors = flat_anchors.size(0)
-            labels = unmap(
-                labels, num_total_anchors, inside_flags,
-                fill=self.num_classes)  # fill bg label
-            label_weights = unmap(label_weights, num_total_anchors,
-                                  inside_flags)
-            bbox_targets = unmap(bbox_targets, num_total_anchors, inside_flags)
-            bbox_weights = unmap(bbox_weights, num_total_anchors, inside_flags)
+        # if unmap_outputs:
+        #     num_total_anchors = flat_anchors.size(0)
+        #     labels = unmap(
+        #         labels, num_total_anchors, inside_flags,
+        #         fill=self.num_classes)  # fill bg label
+        #     label_weights = unmap(label_weights, num_total_anchors,
+        #                           inside_flags)
+        #     bbox_targets = unmap(bbox_targets, num_total_anchors, inside_flags)
+        #     bbox_weights = unmap(bbox_weights, num_total_anchors, inside_flags)
 
         return (labels, label_weights, bbox_targets, bbox_weights, pos_inds,
                 neg_inds, sampling_result)
@@ -354,9 +355,9 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         concat_anchor_list = []
         concat_valid_flag_list = []
         for i in range(num_imgs):
-            assert len(anchor_list[i]) == len(valid_flag_list[i])
+            # assert len(anchor_list[i]) == len(valid_flag_list[i])
             concat_anchor_list.append(torch.cat(anchor_list[i]))
-            concat_valid_flag_list.append(torch.cat(valid_flag_list[i]))
+            concat_valid_flag_list.append([])
 
         # compute targets for each image
         if gt_bboxes_ignore_list is None:
