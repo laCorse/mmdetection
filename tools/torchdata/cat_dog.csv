@@ -1,0 +1,8 @@
+category,cat,dog
+image_url,id
+https://github.com/pytorch/data/blob/main/examples/vision/fakedata/imagefolder/cat/1.jpg,0
+https://github.com/pytorch/data/blob/main/examples/vision/fakedata/imagefolder/cat/2.jpg,0
+https://github.com/pytorch/data/blob/main/examples/vision/fakedata/imagefolder/cat/3.jpg,0
+https://github.com/pytorch/data/blob/main/examples/vision/fakedata/imagefolder/dog/1.jpg,1
+https://github.com/pytorch/data/blob/main/examples/vision/fakedata/imagefolder/dog/2.jpg,1
+https://github.com/pytorch/data/blob/main/examples/vision/fakedata/imagefolder/dog/3.jpg,1
