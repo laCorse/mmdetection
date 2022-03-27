@@ -608,3 +608,52 @@ class FilterAnnotations:
         return self.__class__.__name__ + \
                f'(min_gt_bbox_wh={self.min_gt_bbox_wh},' \
                f'always_keep={self.always_keep})'
+
+
+@PIPELINES.register_module()
+class LoadDepthChannelImageFromFiles(LoadMultiChannelImageFromFiles):
+    def __init__(self,
+                 to_float32=False,
+                 color_type='unchanged',
+                 file_client_args=dict(backend='disk')):
+        super(LoadDepthChannelImageFromFiles, self).__init__(to_float32, color_type, file_client_args)
+
+    def __call__(self, results):
+        filename = results['img_info']['filename']
+        depth_filename = filename.replace('JPEGImages', 'NIR')
+        filename = [filename, depth_filename]
+
+        # copy from LoadDepthChannelImageFromFiles
+        if self.file_client is None:
+            self.file_client = mmcv.FileClient(**self.file_client_args)
+
+        if results['img_prefix'] is not None:
+            filename = [
+                osp.join(results['img_prefix'], fname)
+                for fname in filename
+            ]
+
+        img = []
+        for name in filename:
+            img_bytes = self.file_client.get(name)
+            img_data = mmcv.imfrombytes(img_bytes, flag=self.color_type)
+            if img_data.ndim == 2:
+                img_data = img_data[..., None]
+            img.append(img_data)
+        img = np.concatenate(img, axis=-1)
+        if self.to_float32:
+            img = img.astype(np.float32)
+
+        results['filename'] = filename
+        results['ori_filename'] = results['img_info']['filename']
+        results['img'] = img
+        results['img_shape'] = img.shape
+        results['ori_shape'] = img.shape
+        # Set initial values for default meta_keys
+        results['pad_shape'] = img.shape
+        num_channels = 1 if len(img.shape) < 3 else img.shape[2]
+        results['img_norm_cfg'] = dict(
+            mean=np.zeros(num_channels, dtype=np.float32),
+            std=np.ones(num_channels, dtype=np.float32),
+            to_rgb=False)
+        return results
