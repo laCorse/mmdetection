@@ -233,27 +233,35 @@ class DetCAMVisualizer:
         img = torch.from_numpy(img)[None].permute(0, 3, 1, 2)
         return self.cam(img, targets, aug_smooth, eigen_smooth)[0, :]
 
-    def renormalize_cam_in_bounding_boxes(self, image, boxes, labels,
-                                          grayscale_cam):
+    def show_cam(self,
+                 image,
+                 boxes,
+                 labels,
+                 grayscale_cam,
+                 with_norm_in_bboxes=False):
         """Normalize the CAM to be in the range [0, 1] inside every bounding
         boxes, and zero outside of the bounding boxes."""
-        boxes = boxes.astype(np.int32)
+        if with_norm_in_bboxes is True:
+            boxes = boxes.astype(np.int32)
+            renormalized_cam = np.zeros(grayscale_cam.shape, dtype=np.float32)
+            images = []
+            for x1, y1, x2, y2 in boxes:
+                img = renormalized_cam * 0
+                img[y1:y2,
+                    x1:x2] = scale_cam_image(grayscale_cam[y1:y2,
+                                                           x1:x2].copy())
+                images.append(img)
 
-        renormalized_cam = np.zeros(grayscale_cam.shape, dtype=np.float32)
+            renormalized_cam = np.max(np.float32(images), axis=0)
+            renormalized_cam = scale_cam_image(renormalized_cam)
+        else:
+            renormalized_cam = grayscale_cam
 
-        images = []
-        for x1, y1, x2, y2 in boxes:
-            img = renormalized_cam * 0
-            img[y1:y2, x1:x2] = scale_cam_image(grayscale_cam[y1:y2,
-                                                              x1:x2].copy())
-            images.append(img)
-
-        renormalized_cam = np.max(np.float32(images), axis=0)
-        renormalized_cam = scale_cam_image(renormalized_cam)
-        eigencam_image_renormalized = show_cam_on_image(
+        cam_image_renormalized = show_cam_on_image(
             image / 255, renormalized_cam, use_rgb=False)
-        image_with_bounding_boxes = self._draw_boxes(
-            boxes, labels, eigencam_image_renormalized)
+
+        image_with_bounding_boxes = self._draw_boxes(boxes, labels,
+                                                     cam_image_renormalized)
         return image_with_bounding_boxes
 
     def _draw_boxes(self, boxes, labels, image):
@@ -266,9 +274,9 @@ class DetCAMVisualizer:
                 image,
                 self.classes[label], (int(box[0]), int(box[1] - 5)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
+                0.5,
                 color,
-                2,
+                1,
                 lineType=cv2.LINE_AA)
         return image
 
@@ -311,7 +319,10 @@ class DetBoxScoreTarget:
 
         pred_bboxes = torch.from_numpy(results["bboxes"]).to(self.device)
         pred_labels = results["labels"]
-        pred_segms = torch.from_numpy(results["segms"]).to(self.device)
+        pred_segms = results["segms"]
+
+        if pred_segms is not None:
+            pred_segms = torch.from_numpy(pred_segms).to(self.device)
 
         for focal_box, focal_label, focal_segm in zip(self.focal_bboxes,
                                                       self.focal_labels,
@@ -325,7 +336,7 @@ class DetBoxScoreTarget:
                 score = ious[0, index] + pred_bboxes[..., 4][index]
                 output = output + score
 
-                if focal_segm is not None and pred_segms[index] is not None:
+                if focal_segm is not None and pred_segms is not None:
                     segms_score = (focal_segm * pred_segms[index]).sum() / (
                         focal_segm.sum() + pred_segms[index].sum() + 1e-7)
                     output = output + segms_score

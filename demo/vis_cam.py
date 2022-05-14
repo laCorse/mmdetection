@@ -54,7 +54,7 @@ def parse_args():
     parser.add_argument(
         '--topk',
         type=int,
-        default=3,
+        default=10,
         help='Topk of the predicted result to visualizer')
     parser.add_argument(
         '--max-reshape-shape',
@@ -63,6 +63,10 @@ def parse_args():
         help='max reshape shapes. Its purpose is to save GPU memory. '
         'The activation map is scaled and then evaluated. '
         'If set to (-1, -1), it means no scaling.')
+    parser.add_argument(
+        '--norm-in-bbox',
+        action='store_true',
+        help='No norm in bbox of cam image')
     parser.add_argument(
         '--aug-smooth',
         default=False,
@@ -85,7 +89,7 @@ def parse_args():
     parser.add_argument(
         '--ratio-channels-to-ablate',
         type=int,
-        default=0.1,
+        default=0.5,
         help='Making it much faster of AblationCAM. '
         'The parameter controls how many channels should be ablated')
 
@@ -124,7 +128,7 @@ def init_model_cam(args, cfg):
             print(model.detector)
             raise RuntimeError('layer does not exist', e)
 
-    det_cam = DetCAMVisualizer(
+    det_cam_visualizer = DetCAMVisualizer(
         args.method,
         model,
         target_layers,
@@ -133,7 +137,7 @@ def init_model_cam(args, cfg):
             reshape_transform, max_shape=args.max_reshape_shape),
         ablation_layer=DetAblationLayer(),
         ratio_channels_to_ablate=args.ratio_channels_to_ablate)
-    return model, det_cam
+    return model, det_cam_visualizer
 
 
 def main():
@@ -142,7 +146,7 @@ def main():
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
 
-    model, det_cam = init_model_cam(args, cfg)
+    model, det_cam_visualizer = init_model_cam(args, cfg)
 
     images = args.img
     if not isinstance(images, list):
@@ -167,13 +171,13 @@ def main():
         targets = [
             DetBoxScoreTarget(bboxes=bboxes, labels=labels, segms=segms)
         ]
-        grayscale_cam = det_cam(
+        grayscale_cam = det_cam_visualizer(
             image,
             targets=targets,
             aug_smooth=args.aug_smooth,
             eigen_smooth=args.eigen_smooth)
-        image_with_bounding_boxes = det_cam.renormalize_cam_in_bounding_boxes(
-            image, bboxes, labels, grayscale_cam)
+        image_with_bounding_boxes = det_cam_visualizer.show_cam(
+            image, bboxes, labels, grayscale_cam, args.norm_in_bbox)
 
         if args.out_dir:
             mmcv.mkdir_or_exist(args.out_dir)
