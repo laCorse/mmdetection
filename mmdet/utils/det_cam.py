@@ -100,13 +100,16 @@ def backbone_or_neck_reshape_transform(feats, max_shape=(20, 20)):
 
     max_h = max([im.shape[-2] for im in feats])
     max_w = max([im.shape[-1] for im in feats])
-    max_size = (min(max_h, max_shape[0]), min(max_w, max_shape[1]))
+    if -1 in max_shape:
+        max_shape = (max_h, max_w)
+    else:
+        max_shape = (min(max_h, max_shape[0]), min(max_w, max_shape[1]))
 
     activations = []
     for feat in feats:
         activations.append(
             torch.nn.functional.interpolate(
-                torch.abs(feat), max_size, mode='bilinear'))
+                torch.abs(feat), max_shape, mode='bilinear'))
 
     activations = torch.cat(activations, axis=1)
     return activations
@@ -149,7 +152,6 @@ class AblationLayerBackboneOrNeck(AblationLayer):
         channel_cumsum = np.cumsum([r.shape[1] for r in result])
         num_channels_to_ablate = result[0].size(0)  # batch
         for i in range(num_channels_to_ablate):
-            # 第几层的第几个通道
             pyramid_layer = bisect.bisect_right(channel_cumsum,
                                                 self.indices[i])
             if pyramid_layer > 0:
@@ -161,7 +163,7 @@ class AblationLayerBackboneOrNeck(AblationLayer):
         return result
 
 
-class DetCam:
+class DetCAM:
 
     def __init__(self,
                  cam_method,
@@ -187,8 +189,16 @@ class DetCam:
                 use_cuda=True if 'cuda' in model.device else False,
                 reshape_transform=reshape_transform,
             )
+        elif cam_method == 'featmapam':
+            self.cam = FeatmapAM(
+                model,
+                target_layers,
+                use_cuda=True if 'cuda' in model.device else False,
+                reshape_transform=reshape_transform,
+            )
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(
+                f'{cam_method} cam calculation method is not supported')
 
         self.classes = model.detector.CLASSES
         self.COLORS = np.random.uniform(0, 255, size=(len(self.classes), 3))
@@ -276,9 +286,25 @@ class DetBoxScoreTarget:
                     index] == focal_label:
                 # TODO: Adaptive adjustment of weights based on algorithms
                 score = ious[0, index] + pred_bboxes[..., 4][index]
+                output = output + score
 
                 if focal_segm is not None and pred_segms[index] is not None:
                     segms_score = (focal_segm * pred_segms[index]).sum() / (
                         focal_segm.sum() + pred_segms[index].sum() + 1e-7)
-                output = output + score + segms_score
+                    output = output + segms_score
         return output
+
+
+class FeatmapAM(EigenCAM):
+
+    def __init__(self,
+                 model,
+                 target_layers,
+                 use_cuda=False,
+                 reshape_transform=None):
+        super(FeatmapAM, self).__init__(model, target_layers, use_cuda,
+                                        reshape_transform)
+
+    def get_cam_image(self, input_tensor, target_layer, target_category,
+                      activations, grads, eigen_smooth):
+        return np.mean(activations, axis=1)

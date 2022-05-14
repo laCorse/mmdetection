@@ -8,7 +8,7 @@ import numpy as np
 from mmcv import Config, DictAction
 
 from mmdet.utils.det_cam import (AblationLayerBackboneOrNeck, CAMWrapperModel,
-                                 DetBoxScoreTarget, DetCam,
+                                 DetBoxScoreTarget, DetCAM, FeatmapAM,
                                  backbone_or_neck_reshape_transform)
 
 try:
@@ -17,7 +17,11 @@ except ImportError:
     raise ImportError('Please run `pip install "grad-cam"` to install '
                       '3rd party package pytorch_grad_cam.')
 
-METHOD_MAP = {'ablationcam': AblationCAM, 'eigencam': EigenCAM}
+METHOD_MAP = {
+    'ablationcam': AblationCAM,
+    'eigencam': EigenCAM,
+    'featmapam': FeatmapAM
+}
 
 
 def parse_args():
@@ -27,7 +31,7 @@ def parse_args():
     parser.add_argument('checkpoint', help='Checkpoint file')
     parser.add_argument(
         '--method',
-        default='ablationcam',
+        default='featmapam',
         help='Type of method to use, supports '
         f'{", ".join(list(METHOD_MAP.keys()))}.')
     parser.add_argument(
@@ -36,7 +40,7 @@ def parse_args():
         nargs='+',
         type=str,
         help='The target layers to get CAM, if not set, the tool will '
-        'specify the backbone layer3')
+        'specify the neck')
     parser.add_argument(
         '--preview-model',
         default=False,
@@ -45,24 +49,19 @@ def parse_args():
     parser.add_argument(
         '--device', default='cuda:0', help='Device used for inference')
     parser.add_argument(
-        '--score-thr', type=float, default=0.3, help='bbox score threshold')
+        '--score-thr', type=float, default=0.3, help='Bbox score threshold')
     parser.add_argument(
         '--topk',
         type=int,
-        default=2,
-        help='topk of the predicted result to visualizer')
-    parser.add_argument(
-        '--batch', type=int, default=1, help='batch of inference')
-    parser.add_argument(
-        '--ratio-channels-to-ablate',
-        type=int,
-        default=0.1,
-        help='making it much faster of AblationCAM')
+        default=3,
+        help='Topk of the predicted result to visualizer')
     parser.add_argument(
         '--max-reshape-shape',
         type=tuple,
         default=(20, 20),
-        help='max reshape shapes of AblationCAM')
+        help='max reshape shapes. Its purpose is to save GPU memory. '
+        'The activation map is scaled and then evaluated. '
+        'If set to (-1, -1), it means no scaling.')
     parser.add_argument(
         '--aug-smooth',
         default=False,
@@ -75,6 +74,20 @@ def parse_args():
         help='Reduce noise by taking the first principle componenet of '
         '``cam_weights*activations``')
     parser.add_argument('--out-dir', default=None, help='dir to output file')
+
+    # Only used by AblationCAM
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=1,
+        help='batch of inference of AblationCAM')
+    parser.add_argument(
+        '--ratio-channels-to-ablate',
+        type=int,
+        default=0.1,
+        help='Making it much faster of AblationCAM. '
+        'The parameter controls how many channels should be ablated')
+
     parser.add_argument(
         '--cfg-options',
         nargs='+',
@@ -93,7 +106,7 @@ def parse_args():
     return args
 
 
-def init_mode_cam(args, cfg):
+def init_model_cam(args, cfg):
     # build the model from a config file and a checkpoint file
     model = CAMWrapperModel(
         cfg, args.checkpoint, args.score_thr, device=args.device)
@@ -110,11 +123,11 @@ def init_mode_cam(args, cfg):
             print(model.detector)
             raise RuntimeError('layer does not exist', e)
 
-    det_cam = DetCam(
+    det_cam = DetCAM(
         args.method,
         model,
         target_layers,
-        batch_size=args.batch,
+        batch_size=args.batch_size,
         reshape_transform=partial(
             backbone_or_neck_reshape_transform,
             max_shape=args.max_reshape_shape),
@@ -129,7 +142,7 @@ def main():
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
 
-    model, det_cam = init_mode_cam(args, cfg)
+    model, det_cam = init_model_cam(args, cfg)
 
     images = args.img
     if not isinstance(images, list):
