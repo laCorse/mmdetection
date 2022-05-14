@@ -7,9 +7,10 @@ import mmcv
 import numpy as np
 from mmcv import Config, DictAction
 
-from mmdet.utils.det_cam import (AblationLayerBackboneOrNeck, CAMWrapperModel,
-                                 DetBoxScoreTarget, DetCAM, FeatmapAM,
-                                 backbone_or_neck_reshape_transform)
+from mmdet.utils.det_cam_visualizer import (DetAblationLayer,
+                                            DetBoxScoreTarget, DetCAMModel,
+                                            DetCAMVisualizer, FeatmapAM,
+                                            reshape_transform)
 
 try:
     from pytorch_grad_cam import AblationCAM, EigenCAM
@@ -108,7 +109,7 @@ def parse_args():
 
 def init_model_cam(args, cfg):
     # build the model from a config file and a checkpoint file
-    model = CAMWrapperModel(
+    model = DetCAMModel(
         cfg, args.checkpoint, args.score_thr, device=args.device)
     if args.preview_model:
         print(model.detector)
@@ -123,15 +124,14 @@ def init_model_cam(args, cfg):
             print(model.detector)
             raise RuntimeError('layer does not exist', e)
 
-    det_cam = DetCAM(
+    det_cam = DetCAMVisualizer(
         args.method,
         model,
         target_layers,
         batch_size=args.batch_size,
         reshape_transform=partial(
-            backbone_or_neck_reshape_transform,
-            max_shape=args.max_reshape_shape),
-        ablation_layer=AblationLayerBackboneOrNeck(),
+            reshape_transform, max_shape=args.max_reshape_shape),
+        ablation_layer=DetAblationLayer(),
         ratio_channels_to_ablate=args.ratio_channels_to_ablate)
     return model, det_cam
 

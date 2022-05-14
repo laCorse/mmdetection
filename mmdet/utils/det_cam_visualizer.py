@@ -17,7 +17,36 @@ from mmdet.datasets import replace_ImageToTensor
 from mmdet.datasets.pipelines import Compose
 
 
-class CAMWrapperModel(nn.Module):
+def reshape_transform(feats, max_shape=(20, 20)):
+    """Reshape and aggregate feature maps when the input is a multi-layer
+    feature map.
+
+    Takes these tensors with different sizes, resizes them to a common shape,
+    and concatenates them.
+    """
+    if isinstance(feats, torch.Tensor):
+        feats = [feats]
+
+    max_h = max([im.shape[-2] for im in feats])
+    max_w = max([im.shape[-1] for im in feats])
+    if -1 in max_shape:
+        max_shape = (max_h, max_w)
+    else:
+        max_shape = (min(max_h, max_shape[0]), min(max_w, max_shape[1]))
+
+    activations = []
+    for feat in feats:
+        activations.append(
+            torch.nn.functional.interpolate(
+                torch.abs(feat), max_shape, mode='bilinear'))
+
+    activations = torch.cat(activations, axis=1)
+    return activations
+
+
+class DetCAMModel(nn.Module):
+    """Wrap the mmdet model class to facilitate handling of non-tensor
+    situations during inference."""
 
     def __init__(self, cfg, checkpoint, score_thr, device='cuda:0'):
         super().__init__()
@@ -94,31 +123,10 @@ class CAMWrapperModel(nn.Module):
         return [{"bboxes": bboxes, 'labels': labels, 'segms': segms}]
 
 
-def backbone_or_neck_reshape_transform(feats, max_shape=(20, 20)):
-    if isinstance(feats, torch.Tensor):
-        feats = [feats]
-
-    max_h = max([im.shape[-2] for im in feats])
-    max_w = max([im.shape[-1] for im in feats])
-    if -1 in max_shape:
-        max_shape = (max_h, max_w)
-    else:
-        max_shape = (min(max_h, max_shape[0]), min(max_w, max_shape[1]))
-
-    activations = []
-    for feat in feats:
-        activations.append(
-            torch.nn.functional.interpolate(
-                torch.abs(feat), max_shape, mode='bilinear'))
-
-    activations = torch.cat(activations, axis=1)
-    return activations
-
-
-class AblationLayerBackboneOrNeck(AblationLayer):
+class DetAblationLayer(AblationLayer):
 
     def __init__(self):
-        super(AblationLayerBackboneOrNeck, self).__init__()
+        super(DetAblationLayer, self).__init__()
         self.activations = None
 
     def set_next_batch(self, input_batch_index, activations,
@@ -126,7 +134,7 @@ class AblationLayerBackboneOrNeck(AblationLayer):
         """Extract the next batch member from activations, and repeat it
         num_channels_to_ablate times."""
         if isinstance(activations, torch.Tensor):
-            return super(AblationLayerBackboneOrNeck,
+            return super(DetAblationLayer,
                          self).set_next_batch(input_batch_index, activations,
                                               num_channels_to_ablate)
 
@@ -147,7 +155,7 @@ class AblationLayerBackboneOrNeck(AblationLayer):
         result = self.activations
 
         if isinstance(result, torch.Tensor):
-            return super(AblationLayerBackboneOrNeck, self).__call__(x)
+            return super(DetAblationLayer, self).__call__(x)
 
         channel_cumsum = np.cumsum([r.shape[1] for r in result])
         num_channels_to_ablate = result[0].size(0)  # batch
@@ -163,17 +171,35 @@ class AblationLayerBackboneOrNeck(AblationLayer):
         return result
 
 
-class DetCAM:
+class DetCAMVisualizer:
+    """mmdet cam visualization class.
+
+    Args:
+        method (str):  CAM method. Currently supports
+           `ablationcam`,`eigencam` and `featmapam`.
+        model (nn.Module): MMDet model.
+        target_layers (list[torch.nn.Module]): The target layers
+            you want to visualize.
+        ablation_layer (torch.nn.Module): The ablation layer. Only
+            used by AblationCAM method. Defaults to None.
+        reshape_transform (Callable, optional): Function of Reshape
+            and aggregate feature maps. Defaults to None.
+        batch_size (int): Batch of inference of AblationCAM. Only
+            used by AblationCAM method. Defaults to 1.
+        ratio_channels_to_ablate (float): The parameter controls how
+            many channels should be ablated. Only used by
+            AblationCAM method. Defaults to 0.1.
+    """
 
     def __init__(self,
-                 cam_method,
+                 method,
                  model,
                  target_layers,
                  ablation_layer=None,
                  reshape_transform=None,
                  batch_size=1,
                  ratio_channels_to_ablate=0.1):
-        if cam_method == 'ablationcam':
+        if method == 'ablationcam':
             self.cam = AblationCAM(
                 model,
                 target_layers,
@@ -182,14 +208,14 @@ class DetCAM:
                 batch_size=batch_size,
                 ablation_layer=ablation_layer,
                 ratio_channels_to_ablate=ratio_channels_to_ablate)
-        elif cam_method == 'eigencam':
+        elif method == 'eigencam':
             self.cam = EigenCAM(
                 model,
                 target_layers,
                 use_cuda=True if 'cuda' in model.device else False,
                 reshape_transform=reshape_transform,
             )
-        elif cam_method == 'featmapam':
+        elif method == 'featmapam':
             self.cam = FeatmapAM(
                 model,
                 target_layers,
@@ -198,7 +224,7 @@ class DetCAM:
             )
         else:
             raise NotImplementedError(
-                f'{cam_method} cam calculation method is not supported')
+                f'{method} cam calculation method is not supported')
 
         self.classes = model.detector.CLASSES
         self.COLORS = np.random.uniform(0, 255, size=(len(self.classes), 3))
@@ -248,6 +274,17 @@ class DetCAM:
 
 
 class DetBoxScoreTarget:
+    """For every original detected bounding box specified in "bboxes",
+    assign a score on how the current bounding boxes match it,
+        1. In Bbox IoU
+        2. In the classification score.
+        3. In Mask IoU if ``segms`` exist.
+
+    If there is not a large enough overlap, or the category changed,
+    assign a score of 0.
+
+    The total score is the sum of all the box scores.
+    """
 
     def __init__(self,
                  bboxes,
@@ -296,6 +333,10 @@ class DetBoxScoreTarget:
 
 
 class FeatmapAM(EigenCAM):
+    """Visualize Feature Maps.
+
+    Visualize the (B,C,H,W) feature map averaged over the channel dimension.
+    """
 
     def __init__(self,
                  model,
