@@ -5,7 +5,7 @@ metainfo = {'CLASSES': 'person', 'PALETTE': (220, 20, 60)}
 model = dict(bbox_head=dict(num_classes=1))
 
 train_pipeline = [
-    dict(type='LoadImageFromFile'),
+    dict(type='LoadImageFromFile', file_client_args=_base_.file_client_args),
     dict(type='LoadAnnotations', with_bbox=True),
     dict(
         type='RandomChoiceResize',
