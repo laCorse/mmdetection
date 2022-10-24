@@ -804,3 +804,13 @@ class LoadEmptyAnnotations(BaseTransform):
         repr_str += f'with_seg={self.with_seg}, '
         repr_str += f'seg_ignore_label={self.seg_ignore_label})'
         return repr_str
+
+
+import cv2
+@TRANSFORMS.register_module()
+class ToGray(BaseTransform):
+    def transform(self, results):
+        img = cv2.cvtColor(results['img'], cv2.COLOR_BGR2GRAY)
+        img=cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        results['img'] = img
+        return results

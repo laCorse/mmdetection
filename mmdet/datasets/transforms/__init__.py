@@ -9,7 +9,7 @@ from .geometric import (GeomTransform, Rotate, ShearX, ShearY, TranslateX,
 from .instaboost import InstaBoost
 from .loading import (FilterAnnotations, LoadAnnotations, LoadEmptyAnnotations,
                       LoadImageFromNDArray, LoadMultiChannelImageFromFiles,
-                      LoadPanopticAnnotations, LoadProposals)
+                      LoadPanopticAnnotations, LoadProposals, ToGray)
 from .transforms import (Albu, CachedMixUp, CachedMosaic, CopyPaste, CutOut,
                          Expand, FixShapeResize, MinIoURandomCrop, MixUp,
                          Mosaic, Pad, PhotoMetricDistortion, RandomAffine,
