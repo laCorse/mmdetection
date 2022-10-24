@@ -2,13 +2,13 @@
 dataset_type = 'CocoDataset'
 data_root = 'data/coco/'
 
-# file_client_args = dict(
-#     backend='petrel',
-#     path_mapping=dict({
-#         './data/': 's3://openmmlab/datasets/detection/',
-#         'data/': 's3://openmmlab/datasets/detection/'
-#     }))
-file_client_args = dict(backend='disk')
+file_client_args = dict(
+    backend='petrel',
+    path_mapping=dict({
+        './data/': 's3://openmmlab/datasets/detection/',
+        'data/': 's3://openmmlab/datasets/detection/'
+    }))
+# file_client_args = dict(backend='disk')
 
 train_pipeline = [
     dict(type='LoadImageFromFile', file_client_args=file_client_args),

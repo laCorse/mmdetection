@@ -4,7 +4,7 @@ data_preprocessor = _base_.data_preprocessor
 input_size = _base_.input_size
 
 train_pipeline = [
-    dict(type='LoadImageFromFile'),
+    dict(type='LoadImageFromFile', file_client_args=_base_.file_client_args),
     dict(type='ToGray'),
     dict(type='LoadAnnotations', with_bbox=True),
     dict(
@@ -27,7 +27,7 @@ train_pipeline = [
     dict(type='PackDetInputs')
 ]
 test_pipeline = [
-    dict(type='LoadImageFromFile'),
+    dict(type='LoadImageFromFile', file_client_args=_base_.file_client_args),
     dict(type='ToGray'),
     dict(type='Resize', scale=(input_size, input_size), keep_ratio=False),
     dict(type='LoadAnnotations', with_bbox=True),
