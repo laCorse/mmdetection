@@ -84,6 +84,7 @@ class DetDataPreprocessor(ImgDataPreprocessor):
                  bgr_to_rgb: bool = False,
                  rgb_to_bgr: bool = False,
                  boxtype2tensor: bool = True,
+                 non_blocking: Optional[bool] = False,
                  batch_augments: Optional[List[dict]] = None):
         super().__init__(
             mean=mean,
@@ -91,7 +92,8 @@ class DetDataPreprocessor(ImgDataPreprocessor):
             pad_size_divisor=pad_size_divisor,
             pad_value=pad_value,
             bgr_to_rgb=bgr_to_rgb,
-            rgb_to_bgr=rgb_to_bgr)
+            rgb_to_bgr=rgb_to_bgr,
+            non_blocking=non_blocking)
         if batch_augments is not None:
             self.batch_augments = nn.ModuleList(
                 [MODELS.build(aug) for aug in batch_augments])

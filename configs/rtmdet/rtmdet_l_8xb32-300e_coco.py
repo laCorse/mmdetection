@@ -5,6 +5,7 @@ _base_ = [
 model = dict(
     type='RTMDet',
     data_preprocessor=dict(
+        non_blocking=True,
         type='DetDataPreprocessor',
         mean=[103.53, 116.28, 123.675],
         std=[57.375, 57.12, 58.395],

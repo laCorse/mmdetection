@@ -208,6 +208,11 @@ class DetDataSample(BaseDataElement):
     def pred_sem_seg(self):
         del self._pred_sem_seg
 
+    def pin_memory(self):
+        self.gt_instances.bboxes = self.gt_instances.bboxes.pin_memory()
+        self.gt_instances.labels = self.gt_instances.labels.pin_memory()
+        return self
+
 
 SampleList = List[DetDataSample]
 OptSampleList = Optional[SampleList]

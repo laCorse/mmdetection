@@ -59,6 +59,10 @@ class HorizontalBoxes(BaseBoxes):
             if in_mode == 'cxcywh':
                 self.tensor = self.cxcywh_to_xyxy(self.tensor)
 
+    def pin_memory(self):
+        self.tensor = self.tensor.pin_memory()
+        return self
+
     @staticmethod
     def cxcywh_to_xyxy(boxes: Tensor) -> Tensor:
         """Convert box coordinates from (cx, cy, w, h) to (x1, y1, x2, y2).
